@@ -1879,6 +1879,29 @@ def test_max_file_size_used_in_upload_route(connect):
         assert r.status_code == 200
 
 
+
+def test_max_file_size_used_in_component_server_route(connect):
+    here = os.path.dirname(os.path.abspath(__file__))
+    with gr.Blocks() as demo:
+        file_explorer = gr.FileExplorer(root_dir=here)
+
+    app, _, _ = demo.launch(prevent_thread_lock=True, max_file_size="1kb")
+    test_client = TestClient(app)
+    form_data = {
+        "session_hash": "123",
+        "component_id": str(file_explorer._id),
+        "fn_name": "ls",
+        "data": "",
+    }
+    with open("test/test_files/cheetah1.jpg", "rb") as f:
+        r = test_client.post(
+            f"{API_PREFIX}/component_server/",
+            data=form_data,
+            files={"files": f},
+        )
+        assert r.status_code == 413
+
+
 def test_docs_url():
     with gr.Blocks() as demo:
         num = gr.Number(value=0)
