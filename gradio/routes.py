@@ -1597,28 +1597,29 @@ class App(FastAPI):
             if isinstance(content_type, str) and content_type.startswith(
                 "multipart/form-data"
             ):
+                max_file_size = (
+                    app.get_blocks().max_file_size
+                    if hasattr(app, "get_blocks")
+                    else None
+                )
+                max_file_size = max_file_size if max_file_size is not None else math.inf
+
+                multipart_parser = GradioMultiPartParser(
+                    request.headers,
+                    request.stream(),
+                    max_file_size=max_file_size,
+                )
+                form = await multipart_parser.parse()
+
                 files = []
                 data = {}
-                async with request.form() as form:
-                    for key, value in form.items():
-                        if (
-                            isinstance(value, list)
-                            and len(value) > 1
-                            and isinstance(value[0], StarletteUploadFile)
-                        ):
-                            for i, v in enumerate(value):
-                                if isinstance(v, StarletteUploadFile):
-                                    filename = v.filename
-                                    contents = await v.read()
-                                    files.append((filename, contents))
-                                else:
-                                    data[f"{key}-{i}"] = v
-                        elif isinstance(value, StarletteUploadFile):
-                            filename = value.filename
-                            contents = await value.read()
-                            files.append((filename, contents))
-                        else:
-                            data[key] = value
+                for key, value in form.multi_items():
+                    if isinstance(value, StarletteUploadFile):
+                        filename = value.filename
+                        contents = await value.read()
+                        files.append((filename, contents))
+                    else:
+                        data[key] = value
 
                 return ComponentServerBlobBody(
                     data=DataWithFiles(data=data, files=files),
@@ -1653,7 +1654,12 @@ class App(FastAPI):
         async def component_server(
             request: fastapi.Request,
         ):
-            body = await get_item_or_file(request)
+            try:
+                body = await get_item_or_file(request)
+            except MultiPartException as exc:
+                code = 413 if "maximum allowed size" in exc.message else 400
+                return PlainTextResponse(exc.message, status_code=code)
+
             state = app.state_holder[body.session_hash]
             component_id = body.component_id
             block: Block
